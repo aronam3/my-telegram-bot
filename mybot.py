@@ -1,3 +1,4 @@
+import os
 import telebot
 import requests
 import io
@@ -6,13 +7,13 @@ import urllib3
 # إخفاء تحذيرات الأمان
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# جلب البيانات من إعدادات Render
+# سحب التوكن
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 MY_CHAT_ID = int(os.environ.get('MY_CHAT_ID', 0))
 
-# التحقق من التوكن
+# فحص التوكن
 if not BOT_TOKEN:
-    print("خطأ: BOT_TOKEN غير موجود")
+    print("خطأ: BOT_TOKEN غير موجود في إعدادات Render")
     exit()
 
 bot = telebot.TeleBot(BOT_TOKEN, threaded=False, skip_pending=True)
@@ -27,7 +28,7 @@ def generate_image(message):
     if message.chat.id != MY_CHAT_ID: return
     prompt = message.text.replace('/image', '').strip()
     if not prompt:
-        bot.reply_to(message, "يرجى كتابة وصف للصورة")
+        bot.reply_to(message, "يرجى كتابة وصف للصورة بعد الأمر")
         return
     bot.reply_to(message, "جاري التوليد...")
     try:
@@ -36,8 +37,6 @@ def generate_image(message):
         response = requests.get(image_url, timeout=60, verify=False)
         if response.status_code == 200:
             bot.send_photo(message.chat.id, photo=io.BytesIO(response.content), caption="جاهزة")
-        else:
-            bot.reply_to(message, "خطأ في السيرفر")
     except Exception:
         bot.reply_to(message, "خطأ في الشبكة")
 
@@ -55,3 +54,4 @@ def chat_ai(message):
 
 print("البوت بدأ العمل...")
 bot.infinity_polling(none_stop=True)
+
