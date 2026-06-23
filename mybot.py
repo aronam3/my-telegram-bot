@@ -6,7 +6,7 @@ import urllib3
 import threading
 from http.server import SimpleHTTPRequestHandler, HTTPServer
 
-# إعداد سيرفر بسيط لإرضاء Render (يمنع إغلاق البوت)
+# إعداد السيرفر لمنع Render من إغلاق البوت
 def run_server():
     port = int(os.environ.get('PORT', 10000))
     server = HTTPServer(('0.0.0.0', port), SimpleHTTPRequestHandler)
@@ -20,15 +20,21 @@ BOT_TOKEN = os.environ.get('BOT_TOKEN')
 MY_CHAT_ID = int(os.environ.get('MY_CHAT_ID', 0))
 
 if not BOT_TOKEN:
-    print("خطأ: يرجى إضافة BOT_TOKEN في إعدادات البيئة")
+    print("خطأ: BOT_TOKEN غير موجود")
     exit()
 
-bot = telebot.TeleBot(BOT_TOKEN, threaded=False, skip_pending=True)
+bot = telebot.TeleBot(BOT_TOKEN)
+
+# تنظيف أي اتصال قديم قبل البدء
+try:
+    bot.remove_webhook()
+except:
+    pass
 
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
     if message.chat.id == MY_CHAT_ID:
-        bot.reply_to(message, "البوت يعمل الآن ومستعد لخدمتك!")
+        bot.reply_to(message, "البوت يعمل الآن ومستعد لخدمتك")
 
 @bot.message_handler(commands=['image'])
 def generate_image(message):
@@ -37,17 +43,17 @@ def generate_image(message):
     if not prompt:
         bot.reply_to(message, "يرجى كتابة وصف للصورة.")
         return
-    bot.reply_to(message, "جاري توليد الصورة، يرجى الانتظار...")
+    bot.reply_to(message, "...جاري توليد الصورة، يرجى الانتظار")
     try:
         encoded_prompt = requests.utils.quote(prompt.encode('utf-8'))
         image_url = f"https://pollinations.ai/{encoded_prompt}?width=1024&height=1024&nologo=true"
         response = requests.get(image_url, timeout=60, verify=False)
         if response.status_code == 200:
-            bot.send_photo(message.chat.id, photo=io.BytesIO(response.content), caption="تم توليد الصورة.")
+            bot.send_photo(message.chat.id, photo=io.BytesIO(response.content), caption="توليد الصورة")
         else:
             bot.reply_to(message, "فشل الاتصال بسيرفر الصور.")
-    except:
-        bot.reply_to(message, "خطأ في الشبكة.")
+    except Exception as e:
+        bot.reply_to(message, f"خطأ في الشبكة: {e}")
 
 @bot.message_handler(func=lambda message: True)
 def chat_ai(message):
@@ -58,6 +64,8 @@ def chat_ai(message):
         response = requests.get(f"https://pollinations.ai/{encoded_text}", timeout=60, verify=False)
         if response.status_code == 200:
             bot.reply_to(message, response.text)
+        else:
+            bot.reply_to(message, "حدث خطأ أثناء المحادثة.")
     except:
         bot.reply_to(message, "حدث خطأ أثناء المحادثة.")
 
