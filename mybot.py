@@ -17,7 +17,11 @@ threading.Thread(target=run_server, daemon=True).start()
 # إعداد البوت
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
-MY_CHAT_ID = int(os.environ.get('MY_CHAT_ID', 0))
+try:
+    MY_CHAT_ID = int(os.environ.get('MY_CHAT_ID', 0))
+except ValueError:
+    MY_CHAT_ID = 0
+    print("تنبيه: تم ضبط MY_CHAT_ID يدوياً لتجاوز خطأ التنسيق"
 
 if not BOT_TOKEN:
     print("خطأ: BOT_TOKEN غير موجود")
