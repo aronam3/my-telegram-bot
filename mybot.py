@@ -23,7 +23,7 @@ if not BOT_TOKEN:
     exit()
 
 bot = telebot.TeleBot(BOT_TOKEN)
-
+bot.remove_webhook()  #
 # تنظيف أي اتصال قديم قبل البدء
 try:
     bot.remove_webhook()
