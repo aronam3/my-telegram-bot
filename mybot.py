@@ -1,57 +1,156 @@
-import telebot
-import requests
-import io
 import os
+import io
+import logging
+import replicate
+import requests
+from PIL import Image, ImageEnhance, ImageFilter
+from telegram import Update, constants
+from telegram.ext import Application, CommandHandler, ContextTypes
 
-# جلب التوكن من إعدادات Render التي أضفناها
-BOT_TOKEN = os.environ.get('BOT_TOKEN')
-REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
-MY_CHAT_ID = os.environ.get('MY_CHAT_ID')
+# ==================== الإعدادات ====================
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
-bot = telebot.TeleBot(BOT_TOKEN)
+# قراءة التوكنات من متغيرات البيئة (أفضل للأمان)
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+REPLICATE_API_TOKEN = os.environ.get("REPLICATE_API_TOKEN")
+AUTHORIZED_USER_ID = int(os.environ.get("AUTHORIZED_USER_ID", "6683119855"))
 
-# تنظيف أي Webhook قديم عالق قبل البدء
-bot.delete_webhook()
+if not BOT_TOKEN or not REPLICATE_API_TOKEN:
+    raise ValueError("❌ BOT_TOKEN و REPLICATE_API_TOKEN مطلوبان في متغيرات البيئة!")
 
-@bot.message_handler(commands=['start'])
-def send_welcome(message):
-    bot.reply_to(message, "البوت يعمل الآن بنجاح ومستعد لخدمتك!")
+os.environ["REPLICATE_API_TOKEN"] = REPLICATE_API_TOKEN
 
-@bot.message_handler(commands=['image'])
-def generate_image(message):
-    prompt = message.text.replace('/image', '').strip()
-    if not prompt:
-        bot.reply_to(message, "يرجى كتابة وصف للصورة.")
+# ==================== التحسينات ====================
+BEST_MODEL = "black-forest-labs/flux-2-max"
+
+NEGATIVE_PROMPT = (
+    "watercolor, blurry, low quality, distorted, deformed, "
+    "ugly, bad anatomy, watermark, text, signature, oversaturated, "
+    "oversaturated colors, painting, illustration, cartoon, anime, "
+    "sketch, drawing, oil painting, acrylic, pastel, foggy, "
+    "noise, grainy, pixelated, low resolution, amateur, "
+    "bad hands, extra fingers, mutated hands, poorly drawn hands"
+)
+
+def enhance_prompt(prompt: str) -> str:
+    enhancers = (
+        "photorealistic, 8k resolution, ultra detailed, sharp focus, "
+        "professional photography, DSLR camera, natural lighting, "
+        "high quality, crisp details, realistic textures, "
+        "masterpiece, best quality"
+    )
+    return f"{prompt}, {enhancers}"
+
+def post_process_image(image_bytes: bytes) -> io.BytesIO:
+    img = Image.open(io.BytesIO(image_bytes))
+    
+    if img.mode in ('RGBA', 'LA', 'P'):
+        img = img.convert('RGB')
+    
+    # تحسين الوضوح
+    img = img.filter(ImageFilter.UnsharpMask(radius=2, percent=150, threshold=3))
+    
+    # تحسين التباين
+    enhancer = ImageEnhance.Contrast(img)
+    img = enhancer.enhance(1.1)
+    
+    # تحسين الحدة
+    enhancer = ImageEnhance.Sharpness(img)
+    img = enhancer.enhance(1.2)
+    
+    # تصحيح الألوان
+    enhancer = ImageEnhance.Color(img)
+    img = enhancer.enhance(0.95)
+    
+    output = io.BytesIO()
+    img.save(output, format='JPEG', quality=95, optimize=True)
+    output.seek(0)
+    return output
+
+# ==================== الأوامر ====================
+
+async def is_authorized(update: Update):
+    return update.effective_user.id == AUTHORIZED_USER_ID
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_authorized(update):
         return
     
-    bot.reply_to(message, "جاري توليد الصورة، يرجى الانتظار...")
-    try:
-        encoded_prompt = requests.utils.quote(prompt.encode('utf-8'))
-        image_url = f"https://pollinations.ai/p/{encoded_prompt}?width=1024&height=1024&model=flux"
-        response = requests.get(image_url, timeout=60, verify=False)
-        
-        if response.status_code == 200:
-            bot.send_photo(message.chat.id, photo=io.BytesIO(response.content), caption="توليد الصورة")
-        else:
-            bot.reply_to(message, "فشل الاتصال بسيرفر الصور.")
-    except Exception as e:
-        bot.reply_to(message, f"خطأ في الشبكة: {e}")
+    welcome = (
+        "🎨 *بوت توليد الصور - جودة محسّنة*\n\n"
+        "✨ التحسينات:\n"
+        "• نموذج FLUX.2 Max\n"
+        "• معالجة وضوح + ألوان\n"
+        "• Negative Prompt\n\n"
+        "📝 `/generate وصف الصورة`"
+    )
+    await update.message.reply_text(welcome, parse_mode='Markdown')
 
-@bot.message_handler(func=lambda message: True)
-def chat_ai(message):
-    if message.chat.id != int(MY_CHAT_ID):
+async def generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_authorized(update):
         return
-    bot.send_chat_action(message.chat.id, 'typing')
-    try:
-        encoded_text = requests.utils.quote(message.text.encode('utf-8'))
-        response = requests.get(f"https://pollinations.ai/{encoded_text}", timeout=60)
-        if response.status_code == 200:
-            bot.reply_to(message, response.text)
-        else:
-            bot.reply_to(message, "حدث خطأ أثناء المحادثة.")
-    except Exception:
-        bot.reply_to(message, "حدث خطأ أثناء المحادثة.")
+    
+    if not context.args:
+        await update.message.reply_text("❌ `/generate وصف الصورة`")
+        return
 
-# التشغيل النهائي
-print("البوت بدأ العمل بنجاح...")
-bot.infinity_polling(none_stop=True)
+    prompt = " ".join(context.args)
+    enhanced = enhance_prompt(prompt)
+    
+    await context.bot.send_chat_action(
+        chat_id=update.effective_chat.id, 
+        action=constants.ChatAction.UPLOAD_PHOTO
+    )
+    
+    wait_msg = await update.message.reply_text("⏳ جاري التوليد...")
+    
+    try:
+        output = replicate.run(
+            BEST_MODEL,
+            input={
+                "prompt": enhanced,
+                "negative_prompt": NEGATIVE_PROMPT,
+                "aspect_ratio": "1:1",
+                "output_format": "png",
+                "output_quality": 100,
+                "num_inference_steps": 50,
+                "guidance_scale": 7.5,
+            }
+        )
+        
+        img_url = output[0]
+        response = requests.get(img_url, timeout=60)
+        response.raise_for_status()
+        
+        processed = post_process_image(response.content)
+        await wait_msg.delete()
+        
+        caption = (
+            f"🎨 `{prompt}`\n"
+            f"🤖 FLUX.2 Max | ✨ معالجة"
+        )
+        await update.message.reply_photo(
+            photo=processed,
+            caption=caption,
+            parse_mode='Markdown'
+        )
+        
+    except Exception as e:
+        logger.error(f"Error: {e}")
+        await wait_msg.delete()
+        await update.message.reply_text(f"❌ خطأ: {str(e)[:300]}")
+
+def main():
+    app = Application.builder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("generate", generate))
+    
+    logger.info("🤖 البوت يعمل...")
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
