@@ -69,4 +69,8 @@ def chat_ai(message):
         bot.reply_to(message, "حدث خطأ أثناء المحادثة.")
 
 print("البوت بدأ العمل بنجاح...")
-bot.infinity_polling(none_stop=True)
+WEBHOOK_HOST = 'my-telegram-bot-ksxm.onrender.com'
+WEBHOOK_URL = f"https://{WEBHOOK_HOST}/{BOT_TOKEN}"
+
+bot.remove_webhook()
+bot.set_webhook(url=WEBHOOK_URL)
