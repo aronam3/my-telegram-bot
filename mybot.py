@@ -1,11 +1,10 @@
 import os
 import io
 import logging
-import replicate
 import requests
 from PIL import Image, ImageEnhance, ImageFilter
-from telegram import Update, constants
-from telegram.ext import Application, CommandHandler, ContextTypes
+import telebot
+import replicate
 
 # ==================== الإعدادات ====================
 logging.basicConfig(
@@ -14,13 +13,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# قراءة التوكنات من متغيرات البيئة (أفضل للأمان)
+# قراءة التوكنات من متغيرات البيئة
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 REPLICATE_API_TOKEN = os.environ.get("REPLICATE_API_TOKEN")
 AUTHORIZED_USER_ID = int(os.environ.get("AUTHORIZED_USER_ID", "6683119855"))
 
 if not BOT_TOKEN or not REPLICATE_API_TOKEN:
-    raise ValueError("❌ BOT_TOKEN و REPLICATE_API_TOKEN مطلوبان في متغيرات البيئة!")
+    raise ValueError("❌ BOT_TOKEN و REPLICATE_API_TOKEN مطلوبان!")
 
 os.environ["REPLICATE_API_TOKEN"] = REPLICATE_API_TOKEN
 
@@ -71,13 +70,17 @@ def post_process_image(image_bytes: bytes) -> io.BytesIO:
     output.seek(0)
     return output
 
+# ==================== إنشاء البوت ====================
+bot = telebot.TeleBot(BOT_TOKEN)
+
+# حذف Webhook أولاً
+bot.remove_webhook()
+
 # ==================== الأوامر ====================
 
-async def is_authorized(update: Update):
-    return update.effective_user.id == AUTHORIZED_USER_ID
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await is_authorized(update):
+@bot.message_handler(commands=['start'])
+def start(message):
+    if message.from_user.id != AUTHORIZED_USER_ID:
         return
     
     welcome = (
@@ -88,25 +91,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Negative Prompt\n\n"
         "📝 `/generate وصف الصورة`"
     )
-    await update.message.reply_text(welcome, parse_mode='Markdown')
+    bot.send_message(message.chat.id, welcome, parse_mode='Markdown')
 
-async def generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await is_authorized(update):
+@bot.message_handler(commands=['generate'])
+def generate(message):
+    if message.from_user.id != AUTHORIZED_USER_ID:
         return
     
-    if not context.args:
-        await update.message.reply_text("❌ `/generate وصف الصورة`")
+    # استخراج الوصف من الرسالة
+    prompt = message.text.replace('/generate', '').strip()
+    
+    if not prompt:
+        bot.send_message(message.chat.id, "❌ الاستخدام: `/generate وصف الصورة`")
         return
 
-    prompt = " ".join(context.args)
     enhanced = enhance_prompt(prompt)
     
-    await context.bot.send_chat_action(
-        chat_id=update.effective_chat.id, 
-        action=constants.ChatAction.UPLOAD_PHOTO
-    )
-    
-    wait_msg = await update.message.reply_text("⏳ جاري التوليد...")
+    wait_msg = bot.send_message(message.chat.id, "⏳ جاري التوليد...")
     
     try:
         output = replicate.run(
@@ -127,30 +128,20 @@ async def generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
         response.raise_for_status()
         
         processed = post_process_image(response.content)
-        await wait_msg.delete()
         
-        caption = (
-            f"🎨 `{prompt}`\n"
-            f"🤖 FLUX.2 Max | ✨ معالجة"
-        )
-        await update.message.reply_photo(
-            photo=processed,
-            caption=caption,
-            parse_mode='Markdown'
-        )
+        # حذف رسالة الانتظار
+        bot.delete_message(message.chat.id, wait_msg.message_id)
+        
+        # إرسال الصورة
+        caption = f"🎨 {prompt}\n🤖 FLUX.2 Max | ✨ معالجة"
+        bot.send_photo(message.chat.id, photo=processed, caption=caption)
         
     except Exception as e:
         logger.error(f"Error: {e}")
-        await wait_msg.delete()
-        await update.message.reply_text(f"❌ خطأ: {str(e)[:300]}")
+        bot.delete_message(message.chat.id, wait_msg.message_id)
+        bot.send_message(message.chat.id, f"❌ خطأ: {str(e)[:300]}")
 
-def main():
-    app = Application.builder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("generate", generate))
-    
-    logger.info("🤖 البوت يعمل...")
-    app.run_polling()
-
+# ==================== تشغيل البوت ====================
 if __name__ == "__main__":
-    main()
+    logger.info("🤖 البوت يعمل...")
+    bot.polling(none_stop=True, interval=0)
