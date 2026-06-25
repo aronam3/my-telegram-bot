@@ -1,52 +1,35 @@
-import os
 import telebot
 import requests
 import io
-import urllib3
-import threading
-from http.server import SimpleHTTPRequestHandler, HTTPServer
+import os
 
-# إعداد السيرفر لمنع Render من إغلاق البوت
-def run_server():
-    port = int(os.environ.get('PORT', 10000))
-    server = HTTPServer(('0.0.0.0', port), SimpleHTTPRequestHandler)
-    server.serve_forever()
-
-threading.Thread(target=run_server, daemon=True).start()
-
-# إعداد البوت
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+# جلب التوكن من إعدادات Render التي أضفناها
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
-MY_CHAT_ID = 6683119855
-if not BOT_TOKEN:
-    print("خطأ: BOT_TOKEN غير موجود")
-    exit()
+REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
+MY_CHAT_ID = os.environ.get('MY_CHAT_ID')
 
 bot = telebot.TeleBot(BOT_TOKEN)
-bot.remove_webhook()  #
-# تنظيف أي اتصال قديم قبل البدء
-try:
-    bot.remove_webhook()
-except:
-    pass
 
-@bot.message_handler(commands=['start', 'help'])
+# تنظيف أي Webhook قديم عالق قبل البدء
+bot.delete_webhook()
+
+@bot.message_handler(commands=['start'])
 def send_welcome(message):
-    if message.chat.id == MY_CHAT_ID:
-        bot.reply_to(message, "البوت يعمل الآن ومستعد لخدمتك")
+    bot.reply_to(message, "البوت يعمل الآن بنجاح ومستعد لخدمتك!")
 
 @bot.message_handler(commands=['image'])
 def generate_image(message):
-    if message.chat.id != MY_CHAT_ID: return
     prompt = message.text.replace('/image', '').strip()
     if not prompt:
         bot.reply_to(message, "يرجى كتابة وصف للصورة.")
         return
-    bot.reply_to(message, "...جاري توليد الصورة، يرجى الانتظار")
+    
+    bot.reply_to(message, "جاري توليد الصورة، يرجى الانتظار...")
     try:
         encoded_prompt = requests.utils.quote(prompt.encode('utf-8'))
-        image_url = f"https://pollinations.ai/p/{encoded_prompt}?width=1024&height=1024&model=flux&nologo=true"
+        image_url = f"https://pollinations.ai/p/{encoded_prompt}?width=1024&height=1024&model=flux"
         response = requests.get(image_url, timeout=60, verify=False)
+        
         if response.status_code == 200:
             bot.send_photo(message.chat.id, photo=io.BytesIO(response.content), caption="توليد الصورة")
         else:
@@ -56,21 +39,19 @@ def generate_image(message):
 
 @bot.message_handler(func=lambda message: True)
 def chat_ai(message):
-    if message.chat.id != MY_CHAT_ID: return
+    if message.chat.id != int(MY_CHAT_ID):
+        return
     bot.send_chat_action(message.chat.id, 'typing')
     try:
         encoded_text = requests.utils.quote(message.text.encode('utf-8'))
-        response = requests.get(f"https://pollinations.ai/{encoded_text}", timeout=60, verify=False)
+        response = requests.get(f"https://pollinations.ai/{encoded_text}", timeout=60)
         if response.status_code == 200:
             bot.reply_to(message, response.text)
         else:
             bot.reply_to(message, "حدث خطأ أثناء المحادثة.")
-    except:
+    except Exception:
         bot.reply_to(message, "حدث خطأ أثناء المحادثة.")
 
+# التشغيل النهائي
 print("البوت بدأ العمل بنجاح...")
-WEBHOOK_HOST = 'my-telegram-bot-ksxm.onrender.com'
-WEBHOOK_URL = f"https://{WEBHOOK_HOST}/{BOT_TOKEN}"
-
-bot.remove_webhook()
-bot.set_webhook(url=WEBHOOK_URL)
+bot.infinity_polling(none_stop=True)
