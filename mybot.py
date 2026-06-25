@@ -45,7 +45,7 @@ def generate_image(message):
     bot.reply_to(message, "...جاري توليد الصورة، يرجى الانتظار")
     try:
         encoded_prompt = requests.utils.quote(prompt.encode('utf-8'))
-        image_url = f"https://pollinations.ai/{encoded_prompt}?width=1024&height=1024&nologo=true"
+        image_url = f"https://pollinations.ai/p/{encoded_prompt}?width=1024&height=1024&model=flux&nologo=true"
         response = requests.get(image_url, timeout=60, verify=False)
         if response.status_code == 200:
             bot.send_photo(message.chat.id, photo=io.BytesIO(response.content), caption="توليد الصورة")
